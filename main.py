@@ -7,9 +7,6 @@ def main(args):
     if args.mode == 'train':
         print('Training...')
         train(args)
-    elif args.mode == 'test':
-        print('Testing...')
-        test(args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
