@@ -3,127 +3,155 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import os
+from torch.utils.data import DataLoader as TorchDataLoader
+from torch.utils.tensorboard import SummaryWriter  # TensorBoard support
+from models import Generator, Discriminator, ImageEncoder
 from dataloader import DataLoader
-from models import Generator, Discriminator
 from tqdm import trange
 
+
 def train(args):
-    # 设置设备为 GPU 或 CPU
+    # Set device to GPU or CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # 创建生成器和判别器
+    # Initialize models: Generator, Discriminator, and Image Encoder
     generator = Generator().to(device)
     discriminator = Discriminator().to(device)
+    img_encoder = ImageEncoder().to(device)
 
-    # 优化器
+    # Optimizers
     dis_optim = optim.Adam(discriminator.parameters(), lr=args.discriminator_lr, betas=(args.beta, 0.999))
     gen_optim = optim.Adam(generator.parameters(), lr=args.generator_lr, betas=(args.beta, 0.999))
+    img_optim = optim.Adam(img_encoder.parameters(), lr=args.generator_lr, betas=(args.beta, 0.999))
 
-    # 损失函数
-    criterion = nn.BCELoss()
+    # Loss functions
+    bce_criterion = nn.BCELoss()  # Binary Cross Entropy for GAN losses
+    mse_criterion = nn.MSELoss()  # Mean Squared Error for reconstruction loss
 
-    # 加载数据
-    data_loader = DataLoader(args)
-    X_train = np.array(data_loader.load_data()).astype(np.float32)
-    X_train = torch.tensor(X_train).to(device)
+    # Load dataset using a PyTorch DataLoader
+    dataset = DataLoader(args.dataset)
+    dataloader = TorchDataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
-    dl, gl = [], []
+    # Initialize TensorBoard writer
+    writer = SummaryWriter(log_dir=args.tensorboard_path)
 
-    # 进度条
+    dl, gl, il = [], [], []  # Lists to track discriminator, generator, and image encoder losses
+
+    # Progress bar using tqdm
     progress_bar = trange(args.num_epochs, desc="Training Progress", unit="epoch")
 
     for epoch in progress_bar:
-        # 采样随机 batch
-        idx = np.random.randint(len(X_train), size=args.batch_size)
-        real_images = X_train[idx]
+        for batch_idx, (real_models, real_imgs) in enumerate(dataloader):
+            # Add a channel dimension for real models
+            real_models = real_models.unsqueeze(1).to(device)  # (batch_size, 1, D, H, W)
+            real_imgs = real_imgs.to(device)
 
-        # 添加第四个维度 (batch_size, 1, D, H, W)
-        real_images = real_images.unsqueeze(1)
-        # 生成随机噪声并生成假图像
-        z = np.random.normal(0, 0.33, size=[args.batch_size, args.latent_dim]).astype(np.float32)
-        z = torch.tensor(z).to(device)
-        fake_images = generator(z)
+            # 1. **VAE: Encode images, sample from latent space, and reconstruct 3D models**
+            img_encoder.train()
+            mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
+            z_sampled = img_encoder.sample(mean, logvar)  # Sampling latent vector
+            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
 
-        # 标签
-        real_labels = torch.ones((args.batch_size, 1), device=device)
-        fake_labels = torch.zeros((args.batch_size, 1), device=device)
+            # 2. **Generate fake 3D models using random latent vector for GAN**
+            z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)  # Random latent vector
+            fake_models = generator(z_random)  # Fake models for GAN
 
-        # ---------------------
-        # 训练判别器
-        # ---------------------
-        discriminator.train()
+            # 3. **Discriminator predictions**
+            real_outputs = discriminator(real_models)  # Discriminator output for real models
+            fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach)
 
-        # 训练判别器使用真实图像
-        dis_optim.zero_grad()
-        real_outputs = discriminator(real_images)
-        d_loss_real = criterion(real_outputs, real_labels)
+            # 4. **Discriminator Training**
+            discriminator.train()
+            dis_optim.zero_grad()
 
-        # 训练判别器使用假图像
-        fake_outputs = discriminator(fake_images.detach())
-        d_loss_fake = criterion(fake_outputs, fake_labels)
+            # Discriminator loss (real and fake)
+            real_labels = torch.ones((real_models.shape[0], 1), device=device)
+            fake_labels = torch.zeros((real_models.shape[0], 1), device=device)
+            d_loss_real = bce_criterion(real_outputs, real_labels)
+            d_loss_fake = bce_criterion(fake_outputs, fake_labels)
+            d_loss = 0.5 * (d_loss_real + d_loss_fake)
 
-        # 计算判别器总损失
-        d_loss = 0.5 * (d_loss_real + d_loss_fake)
+            # Calculate discriminator accuracy for logging
+            real_accuracy = (real_outputs > 0.5).float().mean()
+            fake_accuracy = (fake_outputs < 0.5).float().mean()
+            accuracy = 0.5 * (real_accuracy + fake_accuracy)
 
-        # 计算判别器的准确率
-        real_accuracy = (real_outputs > 0.5).float().mean()
-        fake_accuracy = (fake_outputs < 0.5).float().mean()
-        accuracy = 0.5 * (real_accuracy + fake_accuracy)
+            if accuracy.item() < 0.8:
+                # Discriminator backward pass and step
+                d_loss.backward()
+                dis_optim.step()
+            
 
-        if accuracy < 0.8:
-            d_loss.backward()
-            dis_optim.step()
+            # 5. **Image Encoder (VAE) Training**
+            img_optim.zero_grad()
 
-        # ---------------------
-        # 训练生成器
-        # ---------------------
-        generator.train()
+            # KL divergence loss
+            kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) / real_models.shape[0]
+            # Reconstruction loss (between real and reconstructed models)
+            mse_loss = mse_criterion(reconstructed_models, real_models)
 
-        gen_optim.zero_grad()
-        z = np.random.normal(0, 0.33, size=[args.batch_size, args.latent_dim]).astype(np.float32)
-        z = torch.tensor(z).to(device)
+            # Total VAE loss (KL + reconstruction)
+            vae_loss = kl_loss * args.alpha[0] + mse_loss * args.alpha[1]
+            vae_loss.backward()
+            img_optim.step()
 
-        fake_images = generator(z)
+            # 6. **Generator Training (VAE + GAN)**
+            generator.train()
+            gen_optim.zero_grad()
 
-        # 生成器试图欺骗判别器，使判别器输出 1
-        outputs = discriminator(fake_images)
-        g_loss = criterion(outputs, real_labels)
+            # Generator tries to fool the discriminator (use non-detached fake_outputs)
+            fake_outputs_for_gan = discriminator(fake_models)  # Generator part for GAN
+            g_loss = bce_criterion(fake_outputs_for_gan, real_labels)  # GAN loss (fool discriminator)
 
-        g_loss.backward()
-        gen_optim.step()
+            g_loss.backward()
+            gen_optim.step()
 
-        # 保存损失
-        dl.append(d_loss.item())
-        gl.append(g_loss.item())
+            # Record losses
+            dl.append(d_loss.item())
+            gl.append(g_loss.item())
+            il.append(vae_loss.item())
 
+            # TensorBoard: log losses and accuracy
+            global_step = epoch * len(dataloader) + batch_idx
+            writer.add_scalar("Loss/Discriminator", d_loss.item(), global_step)
+            writer.add_scalar("Loss/Generator", g_loss.item(), global_step)
+            writer.add_scalar("Loss/ImageEncoder", vae_loss.item(), global_step)
+            writer.add_scalar("Accuracy/Discriminator", accuracy.item(), global_step)
+
+        # Calculate average losses
         avg_d_loss = round(sum(dl) / len(dl), 4)
         avg_g_loss = round(sum(gl) / len(gl), 4)
+        avg_img_loss = round(sum(il) / len(il), 4)
 
-        # 更新进度条后缀以显示损失
+        # Update progress bar postfix with the average losses
         progress_bar.set_postfix({
-            "d_loss_real": round(d_loss_real.item(), 4),
-            "g_loss": round(g_loss.item(), 4),
             "avg_d_loss": avg_d_loss,
-            "avg_g_loss": avg_g_loss
+            "avg_g_loss": avg_g_loss,
+            "avg_img_loss": avg_img_loss
         })
 
         # ---------------------
-        # 采样
+        # Sampling: Generate and save 3D samples
         # ---------------------
         if epoch % args.sample_epoch == 0:
             if not os.path.exists(args.sample_path):
                 os.makedirs(args.sample_path)
             print('Sampling...')
-            sample_noise = np.random.normal(0, 0.33, size=[args.batch_size, args.latent_dim]).astype(np.float32)
-            sample_noise = torch.tensor(sample_noise).to(device)
+            sample_noise = torch.randn(args.batch_size, args.latent_dim, device=device)
             generated_volumes = generator(sample_noise).cpu().detach().numpy()
             np.save(args.sample_path + f'/sample_epoch_{epoch+1}.npy', generated_volumes)
 
         # ---------------------
-        # 保存权重
+        # Save model checkpoints
         # ---------------------
         if epoch % args.save_epoch == 0:
             if not os.path.exists(args.checkpoints_path):
                 os.makedirs(args.checkpoints_path)
             torch.save(generator.state_dict(), os.path.join(args.checkpoints_path, f'generator_epoch_{epoch+1}.pth'))
             torch.save(discriminator.state_dict(), os.path.join(args.checkpoints_path, f'discriminator_epoch_{epoch+1}.pth'))
+            torch.save(img_encoder.state_dict(), os.path.join(args.checkpoints_path, f'img_encoder_epoch_{epoch+1}.pth'))
+
+    # Close the TensorBoard writer
+    writer.close()
+
+

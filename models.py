@@ -121,3 +121,48 @@ class Generator(torch.nn.Module):
         x = self.conv3(x)
         x = self.conv4(x)
         return self.out(x)
+    
+
+class ImageEncoder(nn.Module):
+    def __init__(self, input_channels=3, output_dim=200):
+        super(ImageEncoder, self).__init__()
+
+        # conv layers
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=11, stride=4, padding=1, bias=False),  # Output: 64 x 62 x 62
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=5, stride=2, padding=1, bias=False),  # Output: 128 x 31 x 31
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=5, stride=2, padding=1, bias=False),  # Output: 256 x 15 x 15
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=5, stride=2, padding=1, bias=False),  # Output: 512 x 7 x 7
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            
+            nn.Conv2d(in_channels=512, out_channels=400, kernel_size=8, stride=1, padding=1, bias=False),  # Output: 400 x 1 x 1
+            nn.BatchNorm2d(400),
+            nn.ReLU(inplace=True),
+        )
+        
+        self.fc_mean = nn.Linear(400, output_dim) 
+        self.fc_logvar = nn.Linear(400, output_dim) 
+
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = x.view(x.size(0), -1)
+        
+        mean = self.fc_mean(x)
+        logvar = self.fc_logvar(x)
+        
+        return mean, logvar
+
+    def sample(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mean + eps * std 

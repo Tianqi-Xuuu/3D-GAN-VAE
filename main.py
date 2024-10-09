@@ -1,7 +1,8 @@
 import os
 import argparse
 from train import train
-from test import test
+from datetime import datetime
+
 
 def main(args):
     if args.mode == 'train':
@@ -24,6 +25,8 @@ if __name__ == "__main__":
     parser.add_argument('--generator_lr', type=float, default=0.0025)
     parser.add_argument('--discriminator_lr', type=float, default=1e-5)
 
+    parser.add_argument('--alpha', type=tuple, default=(5, 1e-4))
+
     parser.add_argument('--device', type=str)
     parser.add_argument('--multi_gpu', type=bool, default=False)
     parser.add_argument('--num_workers', type=int, default=4)
@@ -32,11 +35,12 @@ if __name__ == "__main__":
     parser.add_argument('--sample_epoch', type=int, default=500)
     parser.add_argument('--test_epoch', type=int, default=100)
 
-    parser.add_argument('--checkpoints_path', type=str, default='./checkpoints')
-    parser.add_argument('--train_path', type=str, default='./data/')
-    parser.add_argument('--dataset', type=str, default='ikea')
-    parser.add_argument('--tensorboard_path', type=str, default='./tensorboard')
-    parser.add_argument('--sample_path', type=str, default='./sample')
+    parser.add_argument('--dataset', type=str, default='chair')
+
+    time = datetime.now().strftime("%Y%m%d-%H%M%S")
+    parser.add_argument('--checkpoints_path', type=str, default=f'./Saved/{time}/checkpoints/')
+    parser.add_argument('--tensorboard_path', type=str, default=f'./Saved/{time}/tensorboard/')
+    parser.add_argument('--sample_path', type=str, default=f'./Saved/{time}/sample')
 
     args = parser.parse_args()
     main(args)
