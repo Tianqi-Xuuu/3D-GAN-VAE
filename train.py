@@ -12,7 +12,8 @@ from tqdm import trange
 
 def train(args):
     # Set device to GPU or CPU
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = args.device
+    device = torch.device(device if torch.cuda.is_available() else "cpu")
 
     # Initialize models: Generator, Discriminator, and Image Encoder
     generator = Generator().to(device)

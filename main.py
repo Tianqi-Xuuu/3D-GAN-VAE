@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--im_dim', type=int, default=64)
     parser.add_argument('--num_epochs', type=int, default=10000)
-    parser.add_argument('--batch_size', type=int, default=100)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--latent_dim', type=int, default=200)
 
     parser.add_argument('--kernel_size', type=int, default=4)
@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--alpha', type=tuple, default=(5, 1e-4))
 
-    parser.add_argument('--device', type=str)
+    parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--multi_gpu', type=bool, default=False)
     parser.add_argument('--num_workers', type=int, default=4)
 
