@@ -22,6 +22,14 @@ def train(args):
     discriminator = Discriminator().to(device)
     img_encoder = ImageEncoder().to(device)
 
+    # Load pre-trained models if available
+    if args.pretrained_generator:
+        generator.load_state_dict(torch.load(args.pretrained_generator))
+    if args.pretrained_discriminator:
+        discriminator.load_state_dict(torch.load(args.pretrained_discriminator))
+    if args.pretrained_img_encoder:
+        img_encoder.load_state_dict(torch.load(args.pretrained_img_encoder))
+
     # Optimizers
     dis_optim = optim.Adam(discriminator.parameters(), lr=args.discriminator_lr, betas=(args.beta, 0.999))
     gen_optim = optim.Adam(generator.parameters(), lr=args.generator_lr, betas=(args.beta, 0.999))
@@ -53,12 +61,16 @@ def train(args):
 
     for epoch in progress_bar:
         for batch_idx, (real_models, real_imgs) in enumerate(train_loader):
+
+            generator.train()
+            discriminator.train()
+            img_encoder.train()
+            
             # Add a channel dimension for real models
             real_models = real_models.unsqueeze(1).to(device)  # (batch_size, 1, D, H, W)
             real_imgs = real_imgs.to(device)
 
             # 1. **VAE: Encode images, sample from latent space, and reconstruct 3D models**
-            img_encoder.train()
             mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
             z_sampled = img_encoder.sample(mean, logvar)  # Sampling latent vector
             reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
@@ -72,7 +84,6 @@ def train(args):
             fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach)
 
             # 4. **Discriminator Training**
-            discriminator.train()
             dis_optim.zero_grad()
 
             # Discriminator loss (real and fake)
@@ -107,18 +118,14 @@ def train(args):
             img_optim.step()
 
             # 6. **Generator Training (VAE + GAN)**
-            generator.train()
             gen_optim.zero_grad()
 
             # Generator tries to fool the discriminator (use non-detached fake_outputs)
-            z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)
-            fake_models = generator(z_random)
             fake_outputs = discriminator(fake_models)  # Generator part for GAN
             g_loss = bce_criterion(fake_outputs, real_labels)  # GAN loss (fool discriminator)
 
             g_loss.backward()
             gen_optim.step()
-
 
             # Record losses
             dl.append(d_loss.item())
@@ -145,7 +152,7 @@ def train(args):
         })
 
 
-        if epoch % args.sample_epoch == 0 and epoch != 0:
+        if epoch % args.sample_epoch == 0:
             if not os.path.exists(args.sample_path):
                 os.makedirs(args.sample_path)
             print('Validating...')

@@ -14,15 +14,19 @@ class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
         self.init_dataset()
         
     def init_dataset(self):
-        for file in Path(f'./dataset/{self.dataset}').glob('*'):
-            img = Image.open(file).resize((256, 256))
-            img = np.array(img)
-            self.imgs.append(img)
 
-            idx = str(file).split('/')[-1].removesuffix('.png')
-            idx = int(idx)
+        list_file = Path(f'./dataset/list/{self.dataset}.txt')
+        with open(list_file, 'r') as f:
+            lines = f.readlines()
+            for img_idx, file in enumerate(Path(f'./dataset/{self.dataset}').glob('*')):
+                img = Image.open(file).resize((256, 256))
+                img = np.array(img)
+                self.imgs.append(img)
 
-            self.img2model[idx] = ''
+                idx = str(file).split('/')[-1].removesuffix('.png')
+                idx = int(idx) - 1
+                self.img2model[img_idx] = lines[idx].strip()
+            
 
         for file in Path('./dataset/model').glob(f'*{self.dataset}*'):
             data = loadmat(str(file))
@@ -30,11 +34,6 @@ class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
             file_name = file_name.removesuffix('.mat')
             self.models[file_name] = data['voxel']
 
-        list_file = Path(f'./dataset/list/{self.dataset}.txt')
-
-        with open(list_file, 'r') as f:
-            for idx, line in enumerate(f):
-                self.img2model[idx] = line.strip()
 
     def __getitem__(self, idx):
         img = self.imgs[idx] 
