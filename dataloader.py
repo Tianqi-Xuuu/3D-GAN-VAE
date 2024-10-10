@@ -3,9 +3,9 @@ from pathlib import Path
 from scipy.io import loadmat
 from PIL import Image
 import torch
-from torch.utils.data import DataLoader as TorchDataLoader
+from torch.utils.data import Dataset, DataLoader as TorchDataLoader, random_split
 
-class DataLoader():
+class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
     def __init__(self, dataset):
         self.dataset = dataset
         self.imgs = []
@@ -58,12 +58,28 @@ class DataLoader():
         return len(self.imgs)
 
 if __name__ == "__main__":
-    dataset = DataLoader('chair')  # 假设数据集为 'chair'
-    dataloader = TorchDataLoader(dataset, batch_size=4, shuffle=True, collate_fn=dataset.collect_fn)
-    
-    for xi, yi in dataloader:
-        print("3D Models (xi) batch shape:", xi.shape)
-        print("2D Images (yi) batch shape:", yi.shape)  
-        break 
+    # Load the dataset
+    dataset = DataLoader('chair')  # Assume the dataset is 'chair'
 
+    # Define train/validation split ratio (e.g., 80% train, 20% validation)
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
 
+    # Split the dataset into train and validation sets
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    # Create dataloaders for train and validation sets
+    train_loader = TorchDataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=dataset.collect_fn)
+    val_loader = TorchDataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=dataset.collect_fn)
+
+    # Example of iterating over the train_loader
+    for xi, yi in train_loader:
+        print("Training 3D Models (xi) batch shape:", xi.shape)
+        print("Training 2D Images (yi) batch shape:", yi.shape)
+        break
+
+    # Example of iterating over the val_loader
+    for xi, yi in val_loader:
+        print("Validation 3D Models (xi) batch shape:", xi.shape)
+        print("Validation 2D Images (yi) batch shape:", yi.shape)
+        break
