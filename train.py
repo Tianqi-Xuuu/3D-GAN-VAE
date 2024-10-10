@@ -53,70 +53,72 @@ def train(args):
 
     for epoch in progress_bar:
         for batch_idx, (real_models, real_imgs) in enumerate(train_loader):
-            # --------------------------------------
-            # 1. **Discriminator Training**
-            # --------------------------------------
-            real_models = real_models.unsqueeze(1).to(device)
+            # Add a channel dimension for real models
+            real_models = real_models.unsqueeze(1).to(device)  # (batch_size, 1, D, H, W)
+            real_imgs = real_imgs.to(device)
+
+            # 1. **VAE: Encode images, sample from latent space, and reconstruct 3D models**
+            img_encoder.train()
+            mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
+            z_sampled = img_encoder.sample(mean, logvar)  # Sampling latent vector
+            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
+
+            # 2. **Generate fake 3D models using random latent vector for GAN**
             z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)  # Random latent vector
-            fake_models = generator(z_random)
+            fake_models = generator(z_random)  # Fake models for GAN
 
-            # Get real and fake outputs for the discriminator
+            # 3. **Discriminator predictions**
             real_outputs = discriminator(real_models)  # Discriminator output for real models
-            fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach to avoid updating generator)
+            fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach)
 
-            # Calculate BCE loss for real and fake outputs
+            # 4. **Discriminator Training**
+            discriminator.train()
+            dis_optim.zero_grad()
+
+            # Discriminator loss (real and fake)
             real_labels = torch.ones((real_models.shape[0], 1), device=device)
             fake_labels = torch.zeros((real_models.shape[0], 1), device=device)
             d_loss_real = bce_criterion(real_outputs, real_labels)
             d_loss_fake = bce_criterion(fake_outputs, fake_labels)
             d_loss = 0.5 * (d_loss_real + d_loss_fake)
 
-            accuracy = ((real_outputs > 0.5).float().mean() + (fake_outputs < 0.5).float().mean()) / 2
+            # Calculate discriminator accuracy for logging
+            real_accuracy = (real_outputs > 0.5).float().mean()
+            fake_accuracy = (fake_outputs < 0.5).float().mean()
+            accuracy = 0.5 * (real_accuracy + fake_accuracy)
 
-            # Backward and optimize the discriminator
             if accuracy.item() < 0.8:
+                # Discriminator backward pass and step
                 d_loss.backward()
                 dis_optim.step()
+            
 
-            # --------------------------------------
-            # 2. **Image Encoder (VAE) Training**
-            # --------------------------------------
-            img_encoder.train()
+            # 5. **Image Encoder (VAE) Training**
             img_optim.zero_grad()
 
-            real_imgs = real_imgs.to(device)
-            # Forward pass through VAE and compute KL loss and reconstruction loss
-            mean, logvar = img_encoder(real_imgs)  # Get mean and log variance from encoder
-            z_sampled = img_encoder.sample(mean, logvar)  # Sample latent vector from the Gaussian
-            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models
-
-            # KL divergence and reconstruction losses
+            # KL divergence loss
             kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) / real_models.shape[0]
+            # Reconstruction loss (between real and reconstructed models)
             mse_loss = mse_criterion(reconstructed_models, real_models)
 
             # Total VAE loss (KL + reconstruction)
             vae_loss = kl_loss * args.alpha[0] + mse_loss * args.alpha[1]
-
-            # Backward and optimize the image encoder
             vae_loss.backward()
             img_optim.step()
 
-            # --------------------------------------
-            # 3. **Generator Training**
-            # --------------------------------------
+            # 6. **Generator Training (VAE + GAN)**
             generator.train()
             gen_optim.zero_grad()
 
-            # Recompute fake outputs for generator training (no detach)
+            # Generator tries to fool the discriminator (use non-detached fake_outputs)
             z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)
-            fake_outputs = discriminator(generator(z_random))  # Use current state of the discriminator
-
-            # Calculate GAN loss (generator tries to fool the discriminator)
+            fake_models = generator(z_random)
+            fake_outputs = discriminator(fake_models)  # Generator part for GAN
             g_loss = bce_criterion(fake_outputs, real_labels)  # GAN loss (fool discriminator)
 
-            # Backward and optimize the generator
             g_loss.backward()
             gen_optim.step()
+
 
             # Record losses
             dl.append(d_loss.item())
@@ -137,9 +139,9 @@ def train(args):
 
         # Update progress bar postfix with the average losses
         progress_bar.set_postfix({
-            "avg_d_loss": avg_d_loss,
-            "avg_g_loss": avg_g_loss,
-            "avg_img_loss": avg_img_loss
+            "d_loss": avg_d_loss,
+            "g_loss": avg_g_loss,
+            "img_loss": avg_img_loss
         })
 
 
