@@ -37,9 +37,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--dataset', type=str, default='chair')
 
-    parser.add_argument('--pretrained_generator', type=str, default='/data/3Dgan/3D-GAN-keras/Saved/20241009-150012/checkpoints/generator_epoch_9001.pth')
-    parser.add_argument('--pretrained_discriminator', type=str, default='/data/3Dgan/3D-GAN-keras/Saved/20241009-150012/checkpoints/discriminator_epoch_9001.pth')
-    parser.add_argument('--pretrained_img_encoder', type=str, default='/data/3Dgan/3D-GAN-keras/Saved/20241009-150012/checkpoints/img_encoder_epoch_9001.pth')
+    parser.add_argument('--pretrained_generator', type=str, default=None)
+    parser.add_argument('--pretrained_discriminator', type=str, default=None)
+    parser.add_argument('--pretrained_img_encoder', type=str, default=None)
 
     time = datetime.now().strftime("%Y%m%d-%H%M%S")
     parser.add_argument('--checkpoints_path', type=str, default=f'./Saved/{time}/checkpoints/')

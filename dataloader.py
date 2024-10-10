@@ -44,14 +44,7 @@ class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
         model = torch.tensor(model, dtype=torch.float32)  
         
         return model, img
-     
-    def collect_fn(self, batch):
-        models, imgs = zip(*batch)
-        
-        models = torch.stack(models) 
-        imgs = torch.stack(imgs)
-        
-        return models, imgs 
+    
 
     def __len__(self):
         return len(self.imgs)
@@ -68,8 +61,8 @@ if __name__ == "__main__":
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
     # Create dataloaders for train and validation sets
-    train_loader = TorchDataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=dataset.collect_fn)
-    val_loader = TorchDataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=dataset.collect_fn)
+    train_loader = TorchDataLoader(train_dataset, batch_size=4, shuffle=True)
+    val_loader = TorchDataLoader(val_dataset, batch_size=4, shuffle=False)
 
     # Example of iterating over the train_loader
     for xi, yi in train_loader:
