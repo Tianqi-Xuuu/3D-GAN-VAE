@@ -6,11 +6,12 @@ import torch
 from torch.utils.data import Dataset, DataLoader as TorchDataLoader, random_split
 
 class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
-    def __init__(self, dataset):
+    def __init__(self, dataset, img_size=(256, 256)):
         self.dataset = dataset
         self.imgs = []
         self.models = {}
         self.img2model = {}
+        self.img_size = img_size
         self.init_dataset()
         
     def init_dataset(self):
@@ -19,7 +20,7 @@ class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
         with open(list_file, 'r') as f:
             lines = f.readlines()
             for img_idx, file in enumerate(Path(f'./dataset/{self.dataset}').glob('*')):
-                img = Image.open(file).resize((256, 256))
+                img = Image.open(file).resize(self.img_size)
                 img = np.array(img)
                 self.imgs.append(img)
 
@@ -44,7 +45,7 @@ class DataLoader(Dataset):  # Inherit from torch.utils.data.Dataset
         model = torch.tensor(model, dtype=torch.float32)  
         
         return model, img
-    
+     
 
     def __len__(self):
         return len(self.imgs)

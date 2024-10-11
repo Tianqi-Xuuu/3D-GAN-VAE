@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torchvision import models
 
 class Discriminator(torch.nn.Module):
     def __init__(self, in_channels=1, dim=64, out_conv_channels=512):
@@ -166,3 +167,38 @@ class ImageEncoder(nn.Module):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mean + eps * std 
+    
+class EfficientNetEncoder(nn.Module):
+    def __init__(self, latent_dim=200):
+        super(EfficientNetEncoder, self).__init__()
+        # Use pre-trained EfficientNet as feature extractor
+        self.efficientnet = models.efficientnet_b2(pretrained=True)
+        self.efficientnet = nn.Sequential(*(list(self.efficientnet.children())[:-1]))
+
+        # Linear layers for mean and log variance
+        self.fc_mu = nn.Linear(1408, latent_dim)  # EfficientNet-B0 output is 1280
+        self.fc_logvar = nn.Linear(1408, latent_dim)
+
+        # Freeze EfficientNet parameters
+        for param in list(self.efficientnet.parameters())[:-2]:
+            param.requires_grad = False
+
+    def forward(self, x):
+        # Extract features from EfficientNet
+        x = self.efficientnet(x)
+        x = x.flatten(start_dim=1)  # Flatten to (batch_size, 1280)
+
+        # Compute mean and log variance for reparameterization
+        mu = self.fc_mu(x)
+        logvar = self.fc_logvar(x)
+        return mu, logvar
+
+    # Reparameterization trick to sample z
+    def sample(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+    
+if __name__ == "__main__":
+    vae_encoder = EfficientNetEncoder(latent_dim=200)
+    print(vae_encoder)

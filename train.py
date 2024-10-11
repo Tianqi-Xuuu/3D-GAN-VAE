@@ -41,7 +41,7 @@ def train(args):
 
     # Load dataset using a PyTorch DataLoader
     dataset = DataLoader(args.dataset)
-    train_size = int(0.8 * len(dataset))
+    train_size = int(0.99 * len(dataset))
     val_size = len(dataset) - train_size
 
     # Split the dataset into train and validation sets
@@ -61,28 +61,22 @@ def train(args):
 
     for epoch in progress_bar:
         for batch_idx, (real_models, real_imgs) in enumerate(train_loader):
+
             real_models = real_models.unsqueeze(1).to(device)  # (batch_size, 1, D, H, W)
             real_imgs = real_imgs.to(device)
 
-            # 1. **VAE: Encode images, sample from latent space, and reconstruct 3D models**
-            img_encoder.train()
-            mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
-            z_sampled = img_encoder.sample(mean, logvar)  # Sampling latent vector
-            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
-
-            # 2. **Generate fake 3D models using random latent vector for GAN**
-            z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)  # Random latent vector
-            fake_models = generator(z_random)  # Fake models for GAN
-
-            # 3. **Discriminator predictions**
-            real_outputs = discriminator(real_models)  # Discriminator output for real models
-            fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach)
-
-            # 4. **Discriminator Training**
+            # ----------------------
+            # Discriminator Training
+            # ----------------------
             discriminator.train()
             dis_optim.zero_grad()
 
-            # Discriminator loss (real and fake)
+            z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)  # Random latent vector
+            fake_models = generator(z_random)  # Fake models for GAN
+
+            real_outputs = discriminator(real_models)  # Discriminator output for real models
+            fake_outputs = discriminator(fake_models.detach())  # Discriminator output for fake models (detach)
+            
             real_labels = torch.ones((real_models.shape[0], 1), device=device)
             fake_labels = torch.zeros((real_models.shape[0], 1), device=device)
             d_loss_real = bce_criterion(real_outputs, real_labels)
@@ -99,9 +93,18 @@ def train(args):
                 d_loss.backward()
                 dis_optim.step()
             
-
-            # 5. **Image Encoder (VAE) Training**
+            # ----------------------
+            # Image Encoder (VAE) Training
+            # ----------------------
+            img_encoder.train()
             img_optim.zero_grad()
+
+            for param in generator.parameters():
+                param.requires_grad = False
+
+            mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
+            z_sampled = img_encoder.sample(mean, logvar)  # Sampling latent vector
+            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
 
             # KL divergence loss
             kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) / real_models.shape[0]
@@ -113,7 +116,12 @@ def train(args):
             vae_loss.backward()
             img_optim.step()
 
-            # 6. **Generator Training (VAE + GAN)**
+            for param in generator.parameters():
+                param.requires_grad = True
+
+            # ----------------------
+            # Generator Training
+            # ----------------------
             generator.train()
             gen_optim.zero_grad()
 
@@ -121,12 +129,21 @@ def train(args):
             z_random = torch.randn(real_models.shape[0], args.latent_dim, device=device)
             fake_models = generator(z_random)
             fake_outputs_for_gan = discriminator(fake_models)  # Generator part for GAN
-            g_loss = bce_criterion(fake_outputs_for_gan, real_labels)  # GAN loss (fool discriminator)
+            g_loss_gan = bce_criterion(fake_outputs_for_gan, real_labels)  # GAN loss (fool discriminator)
+
+            mean, logvar = img_encoder(real_imgs)  # Encoder outputs mean and log variance
+            z_sampled = img_encoder.sample(mean, logvar).detach()  # Sampling latent vector
+            reconstructed_models = generator(z_sampled)  # Reconstructed 3D models from latent vector
+            mse_loss = mse_criterion(reconstructed_models, real_models)  # Reconstruction loss
+
+            g_loss = g_loss_gan + mse_loss * args.alpha[1]
 
             g_loss.backward()
             gen_optim.step()
 
-            # Record losses
+            # ----------------------
+            # Logging
+            # ----------------------
             dl.append(d_loss.item())
             gl.append(g_loss.item())
             il.append(vae_loss.item())
@@ -139,15 +156,15 @@ def train(args):
             writer.add_scalar("Accuracy/Discriminator", accuracy.item(), global_step)
 
         # Calculate average losses
-        avg_d_loss = round(sum(dl) / len(dl), 4)
-        avg_g_loss = round(sum(gl) / len(gl), 4)
-        avg_img_loss = round(sum(il) / len(il), 4)
+        avg_d_loss = sum(dl) / len(dl)
+        avg_g_loss = sum(gl) / len(gl)
+        avg_img_loss = sum(il) / len(il)
 
         # Update progress bar postfix with the average losses
         progress_bar.set_postfix({
-            "d_loss": avg_d_loss,
-            "g_loss": avg_g_loss,
-            "img_loss": avg_img_loss
+            "d_loss": f"{avg_d_loss:.4f}",
+            "g_loss": f"{avg_g_loss:.4f}",
+            "img_loss": f"{avg_img_loss:.4f}"
         })
 
 
@@ -155,9 +172,6 @@ def train(args):
             if not os.path.exists(args.sample_path):
                 os.makedirs(args.sample_path)
             print('Validating...')
-
-            generator.eval()
-            img_encoder.eval()
 
             sample_noise = torch.randn(args.batch_size, args.latent_dim, device=device)
             generated_volumes = generator(sample_noise).squeeze().cpu().detach().numpy()
