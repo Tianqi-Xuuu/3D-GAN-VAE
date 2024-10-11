@@ -3,7 +3,7 @@ This is an unofficial implementation of [3dgan](http://3dgan.csail.mit.edu/), or
 
 # Notes
 
-**Splitting the dataset into train and val has caused unknown problem.**
+**Splitting the dataset into train and val has caused unknown problem and the trainning process fails.**
 
 # Requirement
 
